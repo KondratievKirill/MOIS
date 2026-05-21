@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🚗 WiFi Car Control</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { color: white; text-align: center; margin-bottom: 20px; }
+        
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+        .status-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .status-dot {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: #e74c3c;
+            animation: pulse 2s infinite;
+        }
+        .status-dot.connected { background: #2ecc71; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: translateY(-2px); }
+        .btn:disabled { background: #bdc3c7; cursor: not-allowed; }
+        
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 13px;
+        }
+        
+        .btn-refresh {
+            background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+        }
+        
+        .commands-grid {
+            display: grid;
+            gap: 15px;
+        }
+        
+        .command-card {
+            border: 2px solid #e9ecef;
+            border-radius: 10px;
+            padding: 15px;
+            background: #f8f9fa;
+        }
+        .command-card h3 {
+            margin-bottom: 10px;
+            color: #495057;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 8px;
+        }
+        .command-desc {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 15px;
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+        .form-group { margin-bottom: 12px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            color: #555;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .range-value {
+            text-align: center;
+            font-weight: bold;
+            color: #667eea;
+            margin-top: 5px;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background: #ddd;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px; height: 20px;
+            border-radius: 50%;
+            background: #667eea;
+            cursor: pointer;
+        }
+        
+        .log-panel {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin-bottom: 8px;
+            padding: 8px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 4px;
+            border-left: 3px solid #3498db;
+        }
+        .log-entry.success { border-left-color: #2ecc71; }
+        .log-entry.error { border-left-color: #e74c3c; }
+        .log-entry.info { border-left-color: #f39c12; }
+        
+        .telemetry {
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+        }
+        
+        .commands-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚗 WiFi Car Control</h1>
+        
+        <!-- Статус -->
+        <div class="card">
+            <div class="status-bar">
+                <div class="status-left">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">ESP: Disconnected</span>
+                </div>
+                <button class="btn btn-small btn-refresh" onclick="requestCapabilities()" id="refreshBtn" disabled>
+                    🔄 Запросить команды
+                </button>
+            </div>
+            <div class="telemetry" id="telemetry">Uptime: -- | Memory: --</div>
+        </div>
+        
+        <!-- Команды -->
+        <div class="card" id="commandsContainer">
+            <div class="commands-header">
+                <h2>🎮 Команды</h2>
+                <span id="commandsCount" style="color: #666; font-size: 14px;">0 команд</span>
+            </div>
+            <div id="commandsList" class="commands-grid">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📦</div>
+                    <div>Список команд пуст</div>
+                    <div style="font-size: 12px; margin-top: 5px;">Нажмите "Запросить команды" для получения</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Лог -->
+        <div class="card">
+            <h2>📋 Лог событий</h2>
+            <div class="log-panel" id="logPanel">
+                <div class="log-entry info">Система готова...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        let capabilitiesRequested = false;
+        
+        // ========== WEBSOCKET ==========
+        
+        socket.on('connect', () => {
+            document.getElementById('statusDot').classList.add('connected');
+            document.getElementById('statusText').textContent = 'Server: Connected';
+            addLog('✓ Подключено к серверу', 'success');
+            document.getElementById('refreshBtn').disabled = false;
+        });
+        
+        socket.on('disconnect', () => {
+            document.getElementById('statusDot').classList.remove('connected');
+            document.getElementById('statusText').textContent = 'Server: Disconnected';
+            document.getElementById('refreshBtn').disabled = true;
+            addLog('✗ Отключено от сервера', 'error');
+        });
+        
+        socket.on('esp_status', (data) => {
+            if (data.connected) {
+                document.getElementById('statusDot').classList.add('connected');
+                document.getElementById('statusText').textContent = 'ESP: Connected';
+                document.getElementById('refreshBtn').disabled = false;
+                addLog(`✓ ESP подключена: ${data.address}`, 'success');
+                
+                // Автозапрос capabilities при первом подключении
+                if (!capabilitiesRequested) {
+                    setTimeout(() => requestCapabilities(), 500);
+                    capabilitiesRequested = true;
+                }
+            } else {
+                document.getElementById('statusDot').classList.remove('connected');
+                document.getElementById('statusText').textContent = 'ESP: Disconnected';
+                document.getElementById('refreshBtn').disabled = true;
+                addLog('✗ ESP отключена', 'error');
+            }
+        });
+        
+        socket.on('capabilities', (data) => {
+            addLog(`✓ Получено ${data.commands.length} команд от Arduino`, 'success');
+            renderCommands(data.commands);
+            document.getElementById('commandsCount').textContent = `${data.commands.length} команд`;
+        });
+        
+        socket.on('telemetry', (data) => {
+            document.getElementById('telemetry').textContent = 
+                `Uptime: ${data.uptime || '--'}s | Memory: ${data.free_memory || '--'} bytes`;
+        });
+        
+        socket.on('command_result', (data) => {
+            const status = data.exit_code === 0 ? 'success' : 'error';
+            addLog(`✓ ${data.command}: ${data.stdout || data.stderr}`, status);
+            
+            const btn = document.querySelector(`[data-command-id="${data.command_id}"]`);
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Выполнить';
+            }
+        });
+        
+        socket.on('command_error', (data) => {
+            addLog(`✗ Ошибка: ${data.error}`, 'error');
+        });
+        
+        // ========== ФУНКЦИИ ==========
+        
+        function requestCapabilities() {
+            const btn = document.getElementById('refreshBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Запрос...';
+            
+            addLog('→ Запрос списка команд...', 'info');
+            socket.emit('request_capabilities');
+            
+            // Возвращаем кнопку через 3 секунды
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.textContent = '🔄 Запросить команды';
+            }, 3000);
+        }
+        
+        function renderCommands(commands) {
+            const container = document.getElementById('commandsList');
+            container.innerHTML = '';
+            
+            if (commands.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📦</div>
+                        <div>Список команд пуст</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            commands.forEach(cmd => {
+                const card = createCommandCard(cmd);
+                container.appendChild(card);
+            });
+        }
+        
+        function createCommandCard(command) {
+            const card = document.createElement('div');
+            card.className = 'command-card';
+            
+            const title = document.createElement('h3');
+            title.textContent = command.name;
+            card.appendChild(title);
+            
+            if (command.description) {
+                const desc = document.createElement('div');
+                desc.className = 'command-desc';
+                desc.textContent = command.description;
+                card.appendChild(desc);
+            }
+            
+            const form = document.createElement('form');
+            form.dataset.command = command.name;
+            
+            if (command.params_schema && Object.keys(command.params_schema).length > 0) {
+                const paramsDiv = createParamsForm(command.params_schema);
+                form.appendChild(paramsDiv);
+            }
+            
+            const btn = document.createElement('button');
+            btn.type = 'submit';
+            btn.className = 'btn';
+            btn.textContent = `Выполнить ${command.name}`;
+            btn.dataset.commandId = '';
+            
+            form.onsubmit = (e) => {
+                e.preventDefault();
+                executeCommand(command.name, form, btn);
+            };
+            
+            form.appendChild(btn);
+            card.appendChild(form);
+            
+            return card;
+        }
+        
+        function createParamsForm(schema) {
+            const container = document.createElement('div');
+            
+            if (schema.left_pwm && schema.right_pwm) {
+                container.innerHTML = `
+                    <div class="form-row">
+                        <div>
+                            <div class="form-group">
+                                <label>Левый: направление</label>
+                                <select name="left_dir">
+                                    <option value="forward">Вперед</option>
+                                    <option value="backward">Назад</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Левый: скорость</label>
+                                <input type="range" name="left_pwm" min="0" max="255" value="0">
+                                <div class="range-value" id="left_val">0</div>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="form-group">
+                                <label>Правый: направление</label>
+                                <select name="right_dir">
+                                    <option value="forward">Вперед</option>
+                                    <option value="backward">Назад</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Правый: скорость</label>
+                                <input type="range" name="right_pwm" min="0" max="255" value="0">
+                                <div class="range-value" id="right_val">0</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                const leftRange = container.querySelector('[name="left_pwm"]');
+                const rightRange = container.querySelector('[name="right_pwm"]');
+                leftRange.oninput = (e) => document.getElementById('left_val').textContent = e.target.value;
+                rightRange.oninput = (e) => document.getElementById('right_val').textContent = e.target.value;
+                
+                return container;
+            }
+            
+            Object.entries(schema).forEach(([key, param]) => {
+                const group = document.createElement('div');
+                group.className = 'form-group';
+                
+                const label = document.createElement('label');
+                label.textContent = param.description || key;
+                label.htmlFor = key;
+                group.appendChild(label);
+                
+                let input;
+                if (param.enum) {
+                    input = document.createElement('select');
+                    input.name = key;
+                    param.enum.forEach(val => {
+                        const opt = document.createElement('option');
+                        opt.value = val;
+                        opt.textContent = val;
+                        input.appendChild(opt);
+                    });
+                } else if (param.type === 'integer') {
+                    input = document.createElement('input');
+                    input.type = 'number';
+                    input.name = key;
+                    if (param.minimum !== undefined) input.min = param.minimum;
+                    if (param.maximum !== undefined) input.max = param.maximum;
+                    if (param.min !== undefined) input.min = param.min;
+                    if (param.max !== undefined) input.max = param.max;
+                } else {
+                    input = document.createElement('input');
+                    input.type = 'text';
+                    input.name = key;
+                }
+                
+                group.appendChild(input);
+                container.appendChild(group);
+            });
+            
+            return container;
+        }
+        
+        function executeCommand(commandName, form, btn) {
+            const formData = new FormData(form);
+            const params = {};
+            formData.forEach((v, k) => { params[k] = v; });
+            
+            const commandId = `cmd_${Date.now()}`;
+            btn.dataset.commandId = commandId;
+            btn.disabled = true;
+            btn.textContent = 'Выполнение...';
+            
+            socket.emit('send_command', {
+                command: commandName,
+                command_id: commandId,
+                params: params
+            });
+            
+            addLog(`→ Отправка ${commandName}...`, 'info');
+        }
+        
+        function addLog(message, type = 'info') {
+            const panel = document.getElementById('logPanel');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            const time = new Date().toLocaleTimeString();
+            entry.textContent = `[${time}] ${message}`;
+            panel.insertBefore(entry, panel.firstChild);
+            while (panel.children.length > 50) panel.removeChild(panel.lastChild);
+        }
+    </script>
+</body>
+</html>
